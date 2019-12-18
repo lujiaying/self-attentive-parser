@@ -459,6 +459,8 @@ def run_ensemble(args):
 #%%
 
 def run_parse(args):
+    import nltk
+    import pickle
     if args.output_path != '-' and os.path.exists(args.output_path):
         print("Error: output file already exists:", args.output_path)
         return
@@ -472,8 +474,9 @@ def run_parse(args):
 
     print("Parsing sentences...")
     with open(args.input_path) as input_file:
-        sentences = input_file.readlines()
-    sentences = [sentence.split() for sentence in sentences]
+        sentences = input_file.readlines()   # assume each line contains only one sentence
+    #sentences = [sentence.split() for sentence in sentences]
+    sentences = [nltk.word_tokenize(sentence) for sentence in sentences]
 
     # Tags are not available when parsing from raw text, so use a dummy tag
     if 'UNK' in parser.tag_vocab.indices:
@@ -483,24 +486,93 @@ def run_parse(args):
 
     start_time = time.time()
 
+    all_NPs = []  #TODO: push result into, and store in file; Then use networkX to plot
+    all_span_embs = []
     all_predicted = []
     for start_index in range(0, len(sentences), args.eval_batch_size):
         subbatch_sentences = sentences[start_index:start_index+args.eval_batch_size]
 
         subbatch_sentences = [[(dummy_tag, word) for word in sentence] for sentence in subbatch_sentences]
-        predicted, _ = parser.parse_batch(subbatch_sentences)
+        #predicted, _ = parser.parse_batch(subbatch_sentences)
+        predicted, _, word_embs = parser.parse_batch(subbatch_sentences)
+        print('[DEBUG] predicted len=%d, [0]type=%s' % (len(predicted), type(predicted[0])))
+        print('[DEBUG] predicted len=%d, [1]type=%s' % (len(predicted), type(predicted[1])))
+        print('[DEBUG] word_embs len=%d, [0]len=%d, [0][0]shape=%s' % (len(word_embs), len(word_embs[0]), word_embs[0][0].shape))
+        # TODO: add a function to compute NPs, and span representation
         del _
         if args.output_path == '-':
+            """
             for p in predicted:
                 print(p.convert().linearize())
+            """
+            for idx in range(len(predicted)):
+                sent_tree = predicted[idx]
+                word_emb = word_embs[idx]
+                NPs, span_embs = get_NPs_with_idx_and_emb(sent_tree, word_emb)
+                print(sent_tree.convert().linearize())
+                # add sentence idx into NPs
+                NPs = [(NP_tuple[0], NP_tuple[1], NP_tuple[2], idx) for NP_tuple in NPs]
+                print(NPs)
+                #print('[DEBUG] sentence[i=%d] token len=%d' % (idx, len(sentences[idx])))
+                #print('len span_embs=%d, [0] type=%s, shape=%s' % (len(span_embs), type(span_embs[0]), span_embs[0].shape))
+                #print('consine sim for [0] and [1] = %.6f (self)' % (consine_sim(span_embs[0], span_embs[1])))
+                all_NPs.extend(NPs)
+                all_span_embs.extend(span_embs)
         else:
             all_predicted.extend([p.convert() for p in predicted])
+    # persistence
+    pickle.dump(all_NPs, open('data/example2.NPs.pkl' , 'wb'))
+    np.save('data/example2.span_embs.npy', np.array(all_span_embs))
 
     if args.output_path != '-':
         with open(args.output_path, 'w') as output_file:
             for tree in all_predicted:
                 output_file.write("{}\n".format(tree.linearize()))
         print("Output written to:", args.output_path)
+
+def consine_sim(u, v):
+    from numpy import dot
+    from numpy.linalg import norm
+    return dot(u, v) / (norm(u) * norm(v))
+
+def get_NPs_with_idx_and_emb(sent_tree, word_emb, token_start_idx=0):
+
+    def add_indices_to_leaves(treestring, start_idx=0):
+        from nltk.tree import ParentedTree
+        tree = ParentedTree.fromstring(treestring)
+        for idx, _ in enumerate(tree.leaves()):
+            tree_location = tree.leaf_treeposition(idx)
+            non_terminal = tree[tree_location[:-1]]
+            non_terminal[0] = non_terminal[0] + "___" + str(idx+start_idx)
+        return tree
+
+    fencepost_annotations_start, fencepost_annotations_end = word_emb
+    NPs = []  # [(mention, start_idx, end_idx), ()]
+    span_embs = []
+    sent_tree = add_indices_to_leaves(sent_tree.convert().linearize(), token_start_idx)
+    sub_tree_to_traverse = [sent_tree]
+    while sub_tree_to_traverse:
+        tree = sub_tree_to_traverse.pop(0)
+        #print('sub_tree_to_traverse len=%d' % (len(sub_tree_to_traverse)))
+        #print('tree:%s' % (tree))
+        if tree.label() == 'NP':
+            mention = []
+            for leaf_idx, leaf in enumerate(tree.leaves()):
+                token, token_idx = leaf.split('___')
+                mention.append(token)
+                if leaf_idx == 0:
+                    start_idx = int(token_idx)
+                if leaf_idx == len(tree.leaves()) - 1:
+                    end_idx = int(token_idx)
+            #print(mention)
+            NP = (' '.join(mention), start_idx, end_idx)
+            NPs.append(NP)
+            span_emb = (fencepost_annotations_end[end_idx+1, :] - fencepost_annotations_start[start_idx, :]).detach().cpu().numpy()
+            span_embs.append(span_emb)
+        elif tree.label() in ['S', 'VP', 'PP']:
+            for sub_tree in tree:
+                sub_tree_to_traverse.append(sub_tree)
+    return NPs, span_embs
 
 #%%
 def run_viz(args):

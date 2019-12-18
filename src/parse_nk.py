@@ -1074,6 +1074,7 @@ class NKChartParser(nn.Module):
         if not is_train:
             trees = []
             scores = []
+            word_embs = [] #ADD
             if self.f_tag is not None:
                 # Note that tag_logits includes tag predictions for start/stop tokens
                 tag_idxs = torch.argmax(tag_logits, -1).cpu()
@@ -1084,10 +1085,14 @@ class NKChartParser(nn.Module):
                 sentence = sentences[i]
                 if self.f_tag is not None:
                     sentence = list(zip(per_sentence_tags[i], [x[1] for x in sentence]))
+                print('[DEBUG] i=%d, start=%d, end=%d, fencepost_annotations_start shape=%s, fencepost_annotations_end shape=%s' % (
+                       i, start, end, fencepost_annotations_start.shape, fencepost_annotations_end.shape))
                 tree, score = self.parse_from_annotations(fencepost_annotations_start[start:end,:], fencepost_annotations_end[start:end,:], sentence, golds[i])
                 trees.append(tree)
                 scores.append(score)
-            return trees, scores
+                word_embs.append((fencepost_annotations_start[start:end,:], fencepost_annotations_end[start:end,:])) #ADD
+            #return trees, scores
+            return trees, scores, word_embs
 
         # During training time, the forward pass needs to be computed for every
         # cell of the chart, but the backward pass only needs to be computed for
@@ -1140,7 +1145,10 @@ class NKChartParser(nn.Module):
         span_features = (torch.unsqueeze(fencepost_annotations_end, 0)
                          - torch.unsqueeze(fencepost_annotations_start, 1))
 
+        #print('[DEBUG] fencepost_annotations_end shape=%s, fencepost_annotations_start shape=%s' % (fencepost_annotations_end.shape, fencepost_annotations_start.shape))
+        #print('[DEBUG] span_features shape', span_features.shape)
         label_scores_chart = self.f_label(span_features)
+        #print('[DEBUG] label_scores_chart shape', label_scores_chart.shape)
         label_scores_chart = torch.cat([
             label_scores_chart.new_zeros((label_scores_chart.size(0), label_scores_chart.size(1), 1)),
             label_scores_chart
