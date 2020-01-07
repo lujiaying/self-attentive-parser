@@ -495,9 +495,9 @@ def run_parse(args):
         subbatch_sentences = [[(dummy_tag, word) for word in sentence] for sentence in subbatch_sentences]
         #predicted, _ = parser.parse_batch(subbatch_sentences)
         predicted, _, word_embs = parser.parse_batch(subbatch_sentences)
-        print('[DEBUG] predicted len=%d, [0]type=%s' % (len(predicted), type(predicted[0])))
-        print('[DEBUG] predicted len=%d, [1]type=%s' % (len(predicted), type(predicted[1])))
-        print('[DEBUG] word_embs len=%d, [0]len=%d, [0][0]shape=%s' % (len(word_embs), len(word_embs[0]), word_embs[0][0].shape))
+        #print('[DEBUG] predicted len=%d, [0]type=%s' % (len(predicted), type(predicted[0])))
+        #print('[DEBUG] predicted len=%d, [1]type=%s' % (len(predicted), type(predicted[1])))
+        #print('[DEBUG] word_embs len=%d, [0]len=%d, [0][0]shape=%s' % (len(word_embs), len(word_embs[0]), word_embs[0][0].shape))
         # TODO: add a function to compute NPs, and span representation
         del _
         if args.output_path == '-':
@@ -521,8 +521,8 @@ def run_parse(args):
         else:
             all_predicted.extend([p.convert() for p in predicted])
     # persistence
-    pickle.dump(all_NPs, open('data/example2.NPs.pkl' , 'wb'))
-    np.save('data/example2.span_embs.npy', np.array(all_span_embs))
+    pickle.dump(all_NPs, open('data/example3.NPs.pkl' , 'wb'))
+    np.save('data/example3.span_embs.npy', np.array(all_span_embs))
 
     if args.output_path != '-':
         with open(args.output_path, 'w') as output_file:
@@ -569,7 +569,7 @@ def get_NPs_with_idx_and_emb(sent_tree, word_emb, token_start_idx=0):
             NPs.append(NP)
             span_emb = (fencepost_annotations_end[end_idx+1, :] - fencepost_annotations_start[start_idx, :]).detach().cpu().numpy()
             span_embs.append(span_emb)
-        elif tree.label() in ['S', 'VP', 'PP']:
+        elif tree.label() in ['S', 'SBAR', 'VP', 'PP', 'ADJP']:
             for sub_tree in tree:
                 sub_tree_to_traverse.append(sub_tree)
     return NPs, span_embs
